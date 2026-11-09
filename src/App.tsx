@@ -1,10 +1,61 @@
+import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
+import { AuthProvider } from './auth/AuthProvider'
+import { RedirectIfAuthenticated, RequireAuth, RequirePermission } from './auth/guards'
+import { HealthGate } from './components/HealthGate'
+import { Layout } from './components/Layout'
+import LoginPage from './pages/LoginPage'
+import NotFoundPage from './pages/NotFoundPage'
+import RouteError from './pages/RouteError'
+
+// Las páginas privadas se cargan con import() → code splitting (el bundle de /login queda chico).
+const router = createBrowserRouter([
+  {
+    errorElement: <RouteError />,
+    children: [
+      {
+        element: <RedirectIfAuthenticated />,
+        children: [
+          { path: '/login', element: <LoginPage /> },
+          { path: '/register', lazy: async () => ({ Component: (await import('./pages/RegisterPage')).default }) },
+        ],
+      },
+      {
+        element: <RequireAuth />,
+        children: [
+          {
+            element: <Layout />,
+            errorElement: <RouteError />,
+            children: [
+              { path: '/', element: <Navigate to="/files" replace /> },
+              {
+                path: '/files',
+                lazy: async () => {
+                  const { default: FilesPage } = await import('./pages/FilesPage')
+                  return {
+                    Component: () => (
+                      <RequirePermission permission="files:read">
+                        <FilesPage />
+                      </RequirePermission>
+                    ),
+                  }
+                },
+              },
+              { path: '/estado', lazy: async () => ({ Component: (await import('./pages/EstadoPage')).default }) },
+            ],
+          },
+        ],
+      },
+      { path: '*', element: <NotFoundPage /> },
+    ],
+  },
+])
+
 export default function App() {
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 grid place-items-center">
-      <div className="text-center">
-        <h1 className="text-3xl font-bold">Lumon · Macrodata Refinement</h1>
-        <p className="mt-2 text-slate-400">Build: {__LUMON_BUILD__}</p>
-      </div>
-    </main>
+    <HealthGate>
+      <AuthProvider>
+        <RouterProvider router={router} />
+      </AuthProvider>
+    </HealthGate>
   )
 }
