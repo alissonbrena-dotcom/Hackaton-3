@@ -2,7 +2,7 @@
   "teamCode": "TEAM-041",
   "teamName": "Equipo H3 18",
   "deployUrl": "https://hackaton-3-kappa.vercel.app",
-  "storageProvider": "SUPABASE | CLOUDINARY",
+  "storageProvider": "CLOUDINARY",
   "integrantes": [
     {
       "nombre": "Ariana Alejandra Isla Urbina",
