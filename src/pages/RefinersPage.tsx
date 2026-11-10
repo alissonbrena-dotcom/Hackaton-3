@@ -4,6 +4,7 @@ import { ApiError } from '../api/errors'
 import { isAbort } from '../api/files'
 import { getDepartments, getRefiners, safeHttpUrl, type Department, type Refiner, type RefinerPage } from '../api/refiners'
 import { useAuth } from '../auth/context'
+import { isRecord, useLumonEvent } from '../realtime/useEvents'
 
 const SIZES = [10, 25, 50] as const
 
@@ -124,6 +125,23 @@ export default function RefinersPage() {
     return () => controller.abort()
   }, [query, reloadTick])
 
+  // Eventos en vivo: un expediente cambió. Solo se aplica si es una versión MÁS NUEVA.
+  useLumonEvent('refiner.updated', (e) => {
+    const d = e.data
+    if (!isRecord(d)) return
+    const fresh = isRecord(d.refiner) ? d.refiner : d
+    if (typeof fresh.id !== 'number' || typeof fresh.version !== 'number') return
+    const id = fresh.id
+    const version = fresh.version
+    setLoad((prev) => {
+      if (prev.status !== 'ok') return prev
+      const content = prev.data.content.map((r) => (r.id === id && version > r.version ? ({ ...r, ...fresh } as Refiner) : r))
+      return { status: 'ok', data: { ...prev.data, content } }
+    })
+  })
+  // El servidor no pudo reenviar lo perdido: se vuelve a pedir la página, sin recargar.
+  useLumonEvent('stream.reset', () => setReloadTick((t) => t + 1))
+
   const update = (patch: Partial<Query>) => setParams(toParams({ ...query, page: 0, ...patch }))
 
   const data = load.status === 'ok' ? load.data : null
@@ -214,6 +232,11 @@ export default function RefinersPage() {
                             <a href={profile} target="_blank" rel="noopener noreferrer" className="text-sky-300 underline">
                               Perfil<span className="sr-only"> de {r.fullName}</span>
                             </a>
+                          )}
+                          {can('refiners:write') && (
+                            <Link to={`/refiners/${r.id}/edit`} className="text-sky-300 underline">
+                              Editar<span className="sr-only"> el expediente de {r.fullName}</span>
+                            </Link>
                           )}
                           {canEditBadge && (
                             <Link to={`/refiners/${r.id}/badge`} className="text-sky-300 underline">
