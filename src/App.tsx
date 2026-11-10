@@ -53,6 +53,19 @@ const router = createBrowserRouter([
                   }
                 },
               },
+              {
+                path: '/refiners/:id/edit',
+                lazy: async () => {
+                  const { default: RefinerEditPage } = await import('./features/milchick/RefinerEditPage')
+                  return {
+                    Component: () => (
+                      <RequirePermission permission="refiners:write">
+                        <RefinerEditPage />
+                      </RequirePermission>
+                    ),
+                  }
+                },
+              },
               { path: '/estado', lazy: async () => ({ Component: (await import('./pages/EstadoPage')).default }) },
             ],
           },
