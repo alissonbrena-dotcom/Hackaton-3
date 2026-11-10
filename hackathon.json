@@ -1,11 +1,16 @@
 {
-  "teamCode": "TEAM-000",
-  "teamName": "Nombre de la cuadrilla",
-  "deployUrl": "https://",
+  "teamCode": "TEAM-041",
+  "teamName": "Equipo H3 18",
+  "deployUrl": "https://hackaton-3-kappa.vercel.app",
   "storageProvider": "SUPABASE | CLOUDINARY",
   "integrantes": [
-    { "nombre": "Nombre Apellido", "codigo": "CODIGO UTEC" },
-    { "nombre": "Nombre Apellido", "codigo": "CODIGO UTEC" },
-    { "nombre": "Nombre Apellido", "codigo": "CODIGO UTEC" }
+    {
+      "nombre": "Ariana Alejandra Isla Urbina",
+      "codigo": "202510309"
+    },
+    {
+      "nombre": "Alisson Luciana Breña Davila",
+      "codigo": "202410064"
+    }
   ]
 }
