@@ -1,3 +1,50 @@
+# Equipo H3 18 · TEAM-041 — Consola Lumon MDR
+
+| Integrante | Código |
+|:--|:--|
+| Ariana Alejandra Isla Urbina | 202510309 |
+| Alisson Luciana Breña Davila | 202410064 |
+
+**Producción:** https://hackaton-3-kappa.vercel.app
+
+## Cómo ejecutar
+
+Requiere Node 24 LTS y npm.
+
+```bash
+cp .env.example .env   # completar los valores (ver abajo)
+npm ci
+npm run dev            # http://localhost:5173
+npm run build          # tsc -b && vite build
+```
+
+Variables de entorno (todas `VITE_*`, sin valores en el repositorio):
+
+| Variable | Valor |
+|:--|:--|
+| `VITE_API_BASE_URL` | `https://lumon-api.vercel.app/api/v1` |
+| `VITE_WS_BASE_URL` | `wss://lumon-api.vercel.app/api/v1` |
+| `VITE_CLOUDINARY_CLOUD_NAME` | cloud name de Cloudinary (público) |
+| `VITE_CLOUDINARY_UPLOAD_PRESET` | nombre del preset **unsigned** |
+
+## Despliegue
+
+- **Vercel**, conectado a este repositorio: cada push a `main` se despliega solo.
+- `X-Lumon-Build` se inyecta en el build desde `VERCEL_GIT_COMMIT_SHA` (7 caracteres); en local vale `dev`.
+- `vercel.json`: rewrite de SPA a `index.html` (salvo `/.well-known/` y `/assets/`), `Content-Security-Policy` sin
+  `unsafe-eval` y con `connect-src` limitado a la API, el WebSocket y Cloudinary, `X-Content-Type-Options: nosniff`
+  y `Referrer-Policy`.
+- Dominio verificado con `POST /integrations/deploy/challenge` + `public/.well-known/lumon-verification.txt` +
+  `POST /integrations/deploy/verify`.
+
+## Storage
+
+- **Cloudinary**, upload preset **unsigned**: solo `webp`, sin sobrescritura y `public_id` forzado bajo
+  `lumon/TEAM-041/`. En el frontend solo van el cloud name y el nombre del preset (nunca el API key ni el API secret).
+- Registrado y verificado con `PUT /integrations/storage`.
+
+---
+
 # Hackathon Frontend: Lumon Industries — Macrodata Refinement
 
 <div align="center">
