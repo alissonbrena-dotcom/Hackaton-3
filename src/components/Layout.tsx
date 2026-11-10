@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import type { Permission } from '../api/types'
 import { useAuth } from '../auth/context'
+import { RealtimeBridge } from './RealtimeBridge'
+import { StreamIndicator } from './StreamIndicator'
 
 const LINKS: { to: string; label: string; permission: Permission | null }[] = [
   { to: '/files', label: 'Archivos', permission: 'files:read' },
@@ -28,6 +30,7 @@ export function Layout() {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-3 text-sm">
+            <StreamIndicator />
             {me !== null && (
               <span className="text-slate-300">
                 {me.displayName} · {me.team.code} · {me.role.name}
@@ -47,6 +50,7 @@ export function Layout() {
           </div>
         </div>
       </header>
+      <RealtimeBridge />
       <main className="mx-auto max-w-6xl px-4 py-6">
         <Outlet />
       </main>
