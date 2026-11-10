@@ -1,1 +1,33 @@
 @import "tailwindcss";
+
+/* Celdas que dan miedo: tiemblan según su tremor (--amp y la duración se fijan por celda). */
+@keyframes mdr-tremble {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(var(--amp), calc(var(--amp) * -1));
+  }
+  50% {
+    transform: translate(calc(var(--amp) * -1), var(--amp));
+  }
+  75% {
+    transform: translate(var(--amp), var(--amp));
+  }
+}
+
+.mdr-scary {
+  font-weight: 700;
+  color: rgb(253 230 138);
+  animation: mdr-tremble var(--dur, 400ms) linear infinite;
+}
+
+/* Sin movimiento: se distinguen por color, subrayado y peso, no por animación. */
+@media (prefers-reduced-motion: reduce) {
+  .mdr-scary {
+    animation: none;
+    text-decoration: underline wavy rgb(251 191 36);
+    text-underline-offset: 2px;
+  }
+}

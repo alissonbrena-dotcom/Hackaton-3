@@ -40,6 +40,19 @@ const router = createBrowserRouter([
                   }
                 },
               },
+              {
+                path: '/files/:id/refine',
+                lazy: async () => {
+                  const { default: RefinePage } = await import('./pages/RefinePage')
+                  return {
+                    Component: () => (
+                      <RequirePermission permission="files:read">
+                        <RefinePage />
+                      </RequirePermission>
+                    ),
+                  }
+                },
+              },
               { path: '/estado', lazy: async () => ({ Component: (await import('./pages/EstadoPage')).default }) },
             ],
           },
