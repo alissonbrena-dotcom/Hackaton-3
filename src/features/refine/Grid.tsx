@@ -39,7 +39,14 @@ interface GridProps {
   onBinKey: (index: number) => void
   onEscape: () => void
   onDrop: (bin: Bin) => void
-  onPositionChange: (cell: Cell) => void
+  onPositionChange: (cell: Cell, size: { rows: number; cols: number }) => void
+  /** Celdas reservadas por otros: clave r*cols+c → nombre de quien la tiene. */
+  claimedBy: Map<number, string> | null
+  /** Capa superpuesta (cursores de otros); debe ser un elemento estable. */
+  overlay: ReactNode
+  onCursor: (cell: Cell) => void
+  /** Saltar a una celda (cambia `n` para repetir). */
+  jumpTo: { cell: Cell; n: number } | null
 }
 
 interface Viewport {
@@ -50,7 +57,7 @@ interface Viewport {
 }
 
 function GridImpl(props: GridProps) {
-  const { store, rows, cols, rules, selected, initial } = props
+  const { store, rows, cols, rules, selected, initial, claimedBy, overlay, jumpTo } = props
   useSyncExternalStore(store.subscribe, store.getVersion)
 
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -120,10 +127,12 @@ function GridImpl(props: GridProps) {
   // La URL indica la posición (sin llenar el historial: replace + debounce).
   const posR = Math.floor(vp.top / CELL)
   const posC = Math.floor(vp.left / CELL)
+  const viewRows = Math.max(1, Math.floor(vp.height / CELL))
+  const viewCols = Math.max(1, Math.floor(vp.width / CELL))
   useEffect(() => {
-    const t = window.setTimeout(() => cb.current.onPositionChange({ r: posR, c: posC }), 300)
+    const t = window.setTimeout(() => cb.current.onPositionChange({ r: posR, c: posC }, { rows: viewRows, cols: viewCols }), 300)
     return () => window.clearTimeout(t)
-  }, [posR, posC])
+  }, [posR, posC, viewRows, viewCols])
 
   // Lleva el foco del DOM a la celda activa después de moverla con el teclado.
   useEffect(() => {
@@ -149,7 +158,18 @@ function GridImpl(props: GridProps) {
     focusFromKeyboard.current = true
     setFocus(next)
     scrollIntoView(next)
+    cb.current.onCursor(next)
   }
+
+  // Ir a la posición de otro refinador: centra la celda y le pasa el foco.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!jumpTo || !el) return
+    el.scrollTop = Math.max(0, jumpTo.cell.r * CELL - el.clientHeight / 2)
+    el.scrollLeft = Math.max(0, jumpTo.cell.c * CELL - el.clientWidth / 2)
+    focusFromKeyboard.current = true
+    setFocus(jumpTo.cell)
+  }, [jumpTo])
 
   const onKeyDown = (e: KeyboardEvent) => {
     const page = Math.max(1, Math.floor(vp.height / CELL) - 1)
@@ -221,7 +241,11 @@ function GridImpl(props: GridProps) {
 
   const onPointerMove = (e: PointerEvent) => {
     const d = drag.current
-    if (!d) return
+    if (!d) {
+      const target = (e.target as HTMLElement).closest<HTMLElement>('[data-r]')
+      if (target) cb.current.onCursor({ r: Number(target.dataset.r), c: Number(target.dataset.c) })
+      return
+    }
     if (!d.active && Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6) {
       d.active = true
       if (ghostRef.current) ghostRef.current.style.display = 'block'
@@ -291,12 +315,13 @@ function GridImpl(props: GridProps) {
     const bin = tile.bins[i]
     const refined = bin !== '.'
     const isSel = selected?.has(r * cols + c) ?? false
+    const holder = claimedBy?.get(r * cols + c)
     if (scary && !refined) {
       style['--amp'] = `${(0.4 + (tremor / 100) * 1.4).toFixed(2)}px`
       style['--dur'] = `${Math.round(520 - tremor * 3)}ms`
       style.animationDelay = `${-((r * 37 + c * 17) % 400)}ms`
     }
-    const label = `${tile.values[i]}${scary ? ', da miedo' : ''}${refined ? `, en caja ${bin}` : ''}${isSel ? ', seleccionada' : ''}`
+    const label = `${tile.values[i]}${scary ? ', da miedo' : ''}${refined ? `, en caja ${bin}` : ''}${isSel ? ', seleccionada' : ''}${holder ? `, reservada por ${holder}` : ''}`
     return (
       <div
         key={c}
@@ -306,12 +331,14 @@ function GridImpl(props: GridProps) {
         aria-label={label}
         data-r={r}
         data-c={c}
+        title={holder ? `Reservada por ${holder}` : undefined}
         tabIndex={isFocus ? 0 : -1}
         style={style}
         className={[
           'grid select-none place-items-center font-mono text-sm outline-none focus:ring-2 focus:ring-sky-400',
           refined ? BIN_BG[bin] ?? '' : '',
           isSel ? 'bg-sky-700 ring-1 ring-sky-300' : '',
+          holder && !isSel ? 'bg-orange-950 outline outline-1 outline-dashed outline-orange-400' : '',
           scary && !refined ? 'mdr-scary cursor-pointer' : 'text-slate-400',
         ].join(' ')}
       >
@@ -360,6 +387,7 @@ function GridImpl(props: GridProps) {
           style={{ position: 'relative', width: cols * CELL, height: rows * CELL }}
         >
           {rowEls}
+          {overlay}
         </div>
       </div>
       <div

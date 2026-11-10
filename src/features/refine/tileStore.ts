@@ -70,6 +70,7 @@ export class TileStore {
   private timer: number | null = null
   private listeners = new Set<() => void>()
   private disposed = false
+  private lastVisible: { tr: number; tc: number }[] = []
   /** Cambia con cada modificación: sirve para useSyncExternalStore. */
   version = 0
   /** Mensaje de estado para la UI (p. ej. esperando Retry-After). */
@@ -110,6 +111,7 @@ export class TileStore {
    * se cancelan (si estaban en vuelo) o se sacan de la cola.
    */
   setVisible(keys: { tr: number; tc: number }[]) {
+    this.lastVisible = keys
     const wanted = new Set(keys.map((k) => tileKey(k.tr, k.tc)))
     for (const [key, e] of this.entries) {
       e.visible = wanted.has(key)
@@ -147,6 +149,13 @@ export class TileStore {
     for (const [tr, tc] of tiles) this.tiles.delete(tileKey(tr, tc))
     this.emit()
     for (const [tr, tc] of tiles) void this.ensure(tr, tc).catch(() => undefined)
+  }
+
+  /** stream.reset: se descarta la caché y se vuelven a pedir los bloques visibles. */
+  invalidateAll() {
+    this.tiles.clear()
+    this.emit()
+    this.setVisible(this.lastVisible)
   }
 
   /** Marca celdas como refinadas sin volver a pedir la grilla. */

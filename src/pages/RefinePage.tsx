@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { apiRequest } from '../api/client'
 import { ApiError } from '../api/errors'
@@ -17,9 +17,15 @@ import {
   type Rules,
 } from '../api/files'
 import { useAuth } from '../auth/context'
+import { CursorLayer, FloorPanel } from '../features/refine/FloorUI'
 import { Grid } from '../features/refine/Grid'
 import { findGroup, type Group } from '../features/refine/groups'
 import { TileStore } from '../features/refine/tileStore'
+import { FloorClient } from '../realtime/floor'
+import { useLumonEvent } from '../realtime/useEvents'
+
+const noopSubscribe = () => () => undefined
+const zero = () => 0
 
 const BIN_NAME: Record<Bin, string> = { WO: 'WO', FC: 'FC', DR: 'DR', MA: 'MA' }
 const BIN_STYLE: Record<Bin, string> = {
@@ -61,7 +67,8 @@ export default function RefinePage() {
   const fileId = Number(idParam)
   const validId = Number.isInteger(fileId) && fileId > 0
   const [params, setParams] = useSearchParams()
-  const { can } = useAuth()
+  const { can, state: auth } = useAuth()
+  const myUserId = auth.status === 'authenticated' ? auth.me.id : null
   const canRefine = can('files:refine')
 
   const [load, setLoad] = useState<Load>({ status: 'loading' })
@@ -71,6 +78,14 @@ export default function RefinePage() {
   const [searching, setSearching] = useState(false)
   const [refining, setRefining] = useState(false)
   const [msg, setMsg] = useState<Msg>(null)
+  const [floor, setFloor] = useState<FloorClient | null>(null)
+  const [view, setView] = useState({ r0: 0, c0: 0, rows: 20, cols: 30 })
+  const [jumpTo, setJumpTo] = useState<{ cell: Cell; n: number } | null>(null)
+  /** Reserva del grupo seleccionado: pending → held / denied (o none si el piso no está). */
+  const [claim, setClaim] = useState<{ state: 'none' | 'pending' | 'held' | 'denied'; holder: string | null }>({
+    state: 'none',
+    holder: null,
+  })
 
   const searchCtl = useRef<AbortController | null>(null)
   const busy = useRef(false)
@@ -116,12 +131,50 @@ export default function RefinePage() {
     }
   }, [fileId, rows, cols, tileSize])
 
+  // Piso compartido: un WebSocket por pestaña mientras la grilla está abierta; se cierra al salir.
+  useEffect(() => {
+    if (rows === 0) return
+    const f = new FloorClient(fileId)
+    f.myUserId = myUserId
+    f.onReclaimResult = (r) => {
+      if (!r.ok && r.reason === 'HELD') {
+        setClaim({ state: 'denied', holder: r.holder })
+        setMsg({ kind: 'error', text: `Al reconectar, ${r.holder ?? 'otro refinador'} ya tenía reservado tu grupo.` })
+      }
+    }
+    setFloor(f)
+    return () => {
+      f.dispose()
+      setFloor(null)
+    }
+  }, [fileId, rows, myUserId])
+
+  const floorVersion = useSyncExternalStore(floor ? floor.subscribeState : noopSubscribe, floor ? floor.getStateVersion : zero)
+
+  /** Celdas reservadas por otros usuarios. */
+  const claimedBy = useMemo(() => {
+    if (!floor) return null
+    const m = new Map<number, string>()
+    for (const c of floor.claims.values()) {
+      if (c.userId === myUserId) continue
+      for (const cell of c.cells) m.set(cell.r * cols + cell.c, c.displayName)
+    }
+    return m
+    // floorVersion cambia con cada cambio de reservas.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floor, floorVersion, myUserId, cols])
+
+  const cursorLayer = useMemo(() => (floor ? <CursorLayer floor={floor} /> : null), [floor])
+  const onCursor = useCallback((cell: Cell) => floor?.sendCursor(cell), [floor])
+  const goTo = useCallback((cell: Cell) => setJumpTo((j) => ({ cell, n: (j?.n ?? 0) + 1 })), [])
+
   // Posición inicial desde la URL, leída una sola vez por store.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const initial = useMemo(() => (store ? parseCell(params, rows, cols) : { r: 0, c: 0 }), [store])
 
   const onPositionChange = useCallback(
-    (cell: Cell) => {
+    (cell: Cell, size: { rows: number; cols: number }) => {
+      setView({ r0: cell.r, c0: cell.c, rows: size.rows, cols: size.cols })
       setParams(
         (prev) => {
           const next = new URLSearchParams(prev)
@@ -149,7 +202,26 @@ export default function RefinePage() {
         .then((g) => {
           if (ctl.signal.aborted) return
           setGroup(g)
-          if (g === null) setMsg({ kind: 'info', text: 'Esa celda no da miedo.' })
+          floor?.release()
+          setClaim({ state: 'none', holder: null })
+          if (g === null) {
+            setMsg({ kind: 'info', text: 'Esa celda no da miedo.' })
+            return
+          }
+          if (g.noise || g.refinedAs !== null || !floor || !canRefine) return
+          // Antes de llevar el grupo a una caja, se reserva en el piso compartido.
+          setClaim({ state: 'pending', holder: null })
+          void floor.claim(cell).then((r) => {
+            if (ctl.signal.aborted) return
+            if (r.ok) setClaim({ state: 'held', holder: null })
+            else if (r.reason === 'HELD') {
+              setClaim({ state: 'denied', holder: r.holder })
+              setMsg({ kind: 'error', text: `${r.holder ?? 'Otro refinador'} tiene reservado este grupo. Elige otro o espera a que lo libere.` })
+            } else if (r.reason === 'NOT_A_GROUP') {
+              setClaim({ state: 'denied', holder: null })
+              setMsg({ kind: 'error', text: 'El piso dice que ese grupo ya no es válido (ruido o ya refinado).' })
+            } else setClaim({ state: 'none', holder: null }) // piso no disponible: se sigue refinando igual
+          })
         })
         .catch((err: unknown) => {
           if (isAbort(err) || ctl.signal.aborted) return
@@ -159,7 +231,7 @@ export default function RefinePage() {
           if (searchCtl.current === ctl) setSearching(false)
         })
     },
-    [store, rules, rows, cols],
+    [store, rules, rows, cols, floor, canRefine],
   )
 
   const refine = useCallback(
@@ -198,6 +270,8 @@ export default function RefinePage() {
             })
             store.markRefined(group.cells, BIN_CHAR[bin])
             setLoad((prev) => (prev.status === 'ready' ? { ...prev, file: { ...prev.file, ...data.file } } : prev))
+            floor?.forgetClaim() // refinar libera la reserva en el servidor
+            setClaim({ state: 'none', holder: null })
             setGroup(null)
             setMsg({ kind: 'ok', text: `Grupo de ${data.size} celdas refinado en ${bin}.` })
             return
@@ -228,6 +302,7 @@ export default function RefinePage() {
             break
           }
           case 'ALREADY_REFINED': {
+            floor?.release()
             const tiles = isRecord(d) && Array.isArray(d.tiles) ? (d.tiles as [number, number][]) : []
             store.invalidate(tiles)
             setGroup(null)
@@ -240,6 +315,7 @@ export default function RefinePage() {
             break
           }
           case 'GROUP_INVALID': {
+            floor?.release()
             const reason = isRecord(d) && typeof d.reason === 'string' ? d.reason : ''
             const missing = isRecord(d) && typeof d.missing === 'number' ? ` (faltan ${d.missing})` : ''
             setMsg({ kind: 'error', text: `${GROUP_REASON[reason] ?? err.message}${missing} Vuelve a seleccionar el grupo.` })
@@ -254,7 +330,7 @@ export default function RefinePage() {
         setRefining(false)
       }
     },
-    [store, group, canRefine, fileId],
+    [store, group, canRefine, fileId, floor],
   )
 
   const onBinKey = useCallback(
@@ -264,7 +340,49 @@ export default function RefinePage() {
     },
     [refine],
   )
-  const onEscape = useCallback(() => setGroup(null), [])
+  const onEscape = useCallback(() => {
+    floor?.release()
+    setClaim({ state: 'none', holder: null })
+    setGroup(null)
+  }, [floor])
+
+  // ---- Eventos del stream que afectan a la grilla ----
+  useLumonEvent('refinement.created', (e) => {
+    const d = e.data
+    if (!store || typeof d !== 'object' || d === null) return
+    const ev = d as { fileId?: unknown; cells?: unknown; bin?: unknown; progress?: unknown; refinedBy?: unknown }
+    if (ev.fileId !== fileId || !Array.isArray(ev.cells) || typeof ev.bin !== 'string') return
+    const cells = (ev.cells as unknown[]).filter(
+      (c): c is Cell => typeof c === 'object' && c !== null && typeof (c as Cell).r === 'number' && typeof (c as Cell).c === 'number',
+    )
+    const bin = ev.bin as Bin
+    if (!(bin in BIN_CHAR)) return
+    store.markRefined(cells, BIN_CHAR[bin])
+    if (typeof ev.progress === 'object' && ev.progress !== null) {
+      const progress = ev.progress as DataFile['progress']
+      setLoad((prev) => (prev.status === 'ready' ? { ...prev, file: { ...prev.file, progress } } : prev))
+    }
+    // Si alguien refinó el grupo que yo tenía seleccionado, se suelta.
+    if (group && cells.some((c) => group.keys.has(c.r * cols + c.c))) {
+      setGroup(null)
+      const who = typeof ev.refinedBy === 'object' && ev.refinedBy !== null ? (ev.refinedBy as { displayName?: unknown }).displayName : null
+      setMsg({ kind: 'info', text: `${typeof who === 'string' ? who : 'Otro refinador'} acaba de refinar ese grupo.` })
+    }
+  })
+
+  useLumonEvent('file.completed', (e) => {
+    const d = e.data
+    if (typeof d === 'object' && d !== null && (d as { fileId?: unknown }).fileId === fileId)
+      setLoad((prev) => (prev.status === 'ready' ? { ...prev, file: { ...prev.file, status: 'COMPLETE' } } : prev))
+  })
+
+  // stream.reset: se perdieron eventos → volver a pedir el estado sin recargar la página.
+  useLumonEvent('stream.reset', () => {
+    store?.invalidateAll()
+    void getFile(fileId)
+      .then((file) => setLoad((prev) => (prev.status === 'ready' ? { ...prev, file } : prev)))
+      .catch(() => undefined)
+  })
   const onDrop = useCallback((bin: Bin) => void refine(bin), [refine])
 
   if (load.status === 'loading') return <p role="status">Abriendo archivo…</p>
@@ -305,6 +423,16 @@ export default function RefinePage() {
   }
 
   const groupBin = group?.bin ?? null
+  let blockedBy: string | null = null
+  if (group && claimedBy) {
+    for (const k of group.keys) {
+      const h = claimedBy.get(k)
+      if (h) {
+        blockedBy = h
+        break
+      }
+    }
+  }
 
   return (
     <section aria-labelledby="refine-title" className="space-y-4">
@@ -336,7 +464,11 @@ export default function RefinePage() {
               cols={file.cols}
               rules={load.rules}
               selected={group?.keys ?? null}
-              draggable={canRefine && group !== null && !group.noise && group.refinedAs === null}
+              draggable={canRefine && group !== null && !group.noise && group.refinedAs === null && claim.state !== 'denied' && !blockedBy}
+              claimedBy={claimedBy}
+              overlay={cursorLayer}
+              onCursor={onCursor}
+              jumpTo={jumpTo}
               initial={initial}
               onActivate={onActivate}
               onBinKey={onBinKey}
@@ -373,6 +505,12 @@ export default function RefinePage() {
                       ? 'Es ruido: no se puede refinar'
                       : `Caja según las reglas: ${groupBin}`}
                 </li>
+                {blockedBy !== null && <li className="text-orange-300">Reservado por {blockedBy}: no se puede llevar a una caja.</li>}
+                {blockedBy === null && claim.state === 'pending' && <li className="text-slate-400">Reservando en el piso…</li>}
+                {blockedBy === null && claim.state === 'held' && <li className="text-emerald-300">Reservado por ti.</li>}
+                {blockedBy === null && claim.state === 'denied' && (
+                  <li className="text-orange-300">Reserva rechazada{claim.holder ? ` (lo tiene ${claim.holder})` : ''}.</li>
+                )}
               </ul>
             ) : (
               <p className="text-sm text-slate-400">Ninguno. Elige una celda que tiembla.</p>
@@ -394,7 +532,7 @@ export default function RefinePage() {
                 <button
                   type="button"
                   data-bin={bin}
-                  disabled={!canRefine || refining || !group || group.noise || group.refinedAs !== null}
+                  disabled={!canRefine || refining || !group || group.noise || group.refinedAs !== null || claim.state === 'denied' || blockedBy !== null || claim.state === 'pending'}
                   onClick={() => void refine(bin)}
                   aria-keyshortcuts={String(i + 1)}
                   aria-label={`Llevar el grupo a ${BIN_NAME[bin]} (tecla ${i + 1}). Progreso ${Math.round(file.progress[bin] * 100)} %`}
@@ -412,6 +550,7 @@ export default function RefinePage() {
             ))}
           </ul>
           {!canRefine && <p className="text-sm text-slate-400">Tu rol solo puede ver la grilla.</p>}
+          {floor && <FloorPanel floor={floor} view={view} onGoTo={goTo} />}
           <p className="text-sm">Progreso total: {Math.round(file.progress.overall * 100)} %</p>
         </aside>
       </div>
