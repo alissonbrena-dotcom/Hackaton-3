@@ -94,6 +94,7 @@ export default function EstadoPage() {
 
   const [checking, setChecking] = useState(false)
   const [checkResult, setCheckResult] = useState<Async<Clearance> | null>(null)
+  const [chaosMsg, setChaosMsg] = useState<string | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -119,8 +120,20 @@ export default function EstadoPage() {
     }
   }, [])
 
+  const setChaos = async (level: number) => {
+    setChaosMsg('Cambiando el modo caos…')
+    try {
+      await apiRequest('/workspace/chaos', { method: 'PUT', json: { level } })
+      setChaosMsg(`Modo caos en nivel ${level}.`)
+      setTick((t) => t + 1)
+    } catch (err) {
+      setChaosMsg(errMsg(err))
+    }
+  }
+
   const clearanceData = clearance.status === 'ok' ? clearance.data : null
   const granted = clearanceData?.granted ?? false
+  const chaosLevel = clearanceData?.workspace?.chaosLevel
 
   return (
     <section aria-labelledby="estado-title" className="space-y-4">
@@ -236,6 +249,29 @@ export default function EstadoPage() {
         </div>
       </Card>
 
+      <Card title="Modo caos (workspace de desarrollo)">
+        <p className="text-sm text-slate-300">
+          Nivel actual: {chaosLevel ?? '—'}. La revisión automática exige caos 1 o 2 al refinar.
+        </p>
+        <div className="mt-2 flex gap-2" role="group" aria-label="Nivel de caos">
+          {[0, 1, 2].map((level) => (
+            <button
+              key={level}
+              type="button"
+              aria-pressed={chaosLevel === level}
+              onClick={() => void setChaos(level)}
+              className="rounded-md border border-slate-600 px-3 py-1 hover:bg-slate-800 aria-pressed:bg-sky-800"
+            >
+              Nivel {level}
+            </button>
+          ))}
+        </div>
+        {chaosMsg && (
+          <p role="status" className="mt-2 text-sm">
+            {chaosMsg}
+          </p>
+        )}
+      </Card>
     </section>
   )
 }
