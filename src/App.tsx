@@ -79,6 +79,45 @@ const router = createBrowserRouter([
                   }
                 },
               },
+              {
+                path: '/refiners/:id/badge',
+                lazy: async () => {
+                  const { default: BadgeEditorPage } = await import('./pages/BadgeEditorPage')
+                  return {
+                    Component: () => (
+                      <RequirePermission permission="refiners:write">
+                        <BadgeEditorPage />
+                      </RequirePermission>
+                    ),
+                  }
+                },
+              },
+              {
+                path: '/incidents',
+                lazy: async () => {
+                  const { default: IncidentsPage } = await import('./pages/IncidentsPage')
+                  return {
+                    Component: () => (
+                      <RequirePermission permission="incidents:read">
+                        <IncidentsPage />
+                      </RequirePermission>
+                    ),
+                  }
+                },
+              },
+              {
+                path: '/incidents/new',
+                lazy: async () => {
+                  const { default: IncidentNewPage } = await import('./pages/IncidentNewPage')
+                  return {
+                    Component: () => (
+                      <RequirePermission permission="incidents:create">
+                        <IncidentNewPage />
+                      </RequirePermission>
+                    ),
+                  }
+                },
+              },
               { path: '/estado', lazy: async () => ({ Component: (await import('./pages/EstadoPage')).default }) },
             ],
           },
